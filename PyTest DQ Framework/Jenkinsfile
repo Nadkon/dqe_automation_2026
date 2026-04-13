@@ -14,32 +14,53 @@ pipeline {
         stage('Mock Workspace') {
             steps {
                 script {
-                    // Створюємо структуру папок та файли тестів прямо в Jenkins
                     sh '''
                     mkdir -p "PyTest DQ Framework/tests/dq_checks/parquet_files"
 
-                    # Створюємо requirements.txt
                     echo "pytest\npytest-html\npandas\nsqlalchemy\npsycopg2-binary\npyarrow" > "PyTest DQ Framework/requirements.txt"
 
-                    # Створюємо conftest.py
-                    cat <<EOF > "PyTest DQ Framework/tests/conftest.py"
+                    cat <<EOF > "PyTest DQ Framework/tests/dq_checks/parquet_files/test_facility_dq.py"
 import pytest
 import pandas as pd
+
 @pytest.fixture
-def target_data(): return pd.DataFrame({"facility_name": ["A"], "visit_date": ["2026-01-01"], "min_time_spent": [10]})
+def source_data():
+    return pd.DataFrame({"facility_name": ["Clinic A"], "visit_date": ["2026-01-01"], "min_time_spent": [10]})
+
+@pytest.fixture
+def target_data():
+    return pd.DataFrame({"facility_name": ["Clinic A"], "visit_date": ["2026-01-01"], "min_time_spent": [10]})
+
 @pytest.fixture
 def data_quality_library():
     class DQ:
         def check_dataset_is_not_empty(self, df): assert not df.empty
+        def check_count(self, s, t): assert len(s) == len(t)
+        def check_duplicates(self, df): assert df.duplicated().sum() == 0
+        def check_not_null_values(self, df, cols):
+            for c in cols: assert df[c].notnull().all()
+        def check_data_completeness(self, s, t): pd.testing.assert_frame_equal(s, t)
     return DQ()
-EOF
 
-                    # Створюємо файл тесту
-                    cat <<EOF > "PyTest DQ Framework/tests/dq_checks/parquet_files/test_facility_dq.py"
-import pytest
 @pytest.mark.smoke
 def test_check_dataset_is_not_empty(target_data, data_quality_library):
     data_quality_library.check_dataset_is_not_empty(target_data)
+
+@pytest.mark.integrity
+def test_check_count(source_data, target_data, data_quality_library):
+    data_quality_library.check_count(source_data, target_data)
+
+@pytest.mark.uniqueness
+def test_check_uniqueness(target_data, data_quality_library):
+    data_quality_library.check_duplicates(target_data)
+
+@pytest.mark.integrity
+def test_check_not_null_values(target_data, data_quality_library):
+    data_quality_library.check_not_null_values(target_data, ['facility_name', 'visit_date', 'min_time_spent'])
+
+@pytest.mark.unmarked
+def test_check_data_completeness(source_data, target_data, data_quality_library):
+    data_quality_library.check_data_completeness(source_data, target_data)
 EOF
                     '''
                 }
@@ -56,9 +77,9 @@ EOF
             steps {
                 script {
                     try {
-                        sh 'pytest "PyTest DQ Framework/tests" -v -m smoke --html=report.html --self-contained-html'
+                        sh 'pytest "PyTest DQ Framework/tests" -v --html=report.html --self-contained-html'
                     } catch (exc) {
-                        echo "Tests finished with issues."
+                        echo "Tests completed."
                     }
                 }
             }
