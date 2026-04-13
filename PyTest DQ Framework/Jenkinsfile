@@ -1,0 +1,49 @@
+pipeline {
+    agent any
+
+    environment {
+        DB_USER      = credentials('postgres-user')
+        DB_PASSWORD  = credentials('postgres-pass')
+        DB_HOST      = 'postgres'
+        DB_PORT      = '5432'
+        DB_NAME      = 'postgres'
+        PARQUET_PATH = '/parquet_data/transformed_data.parquet'
+    }
+
+    stages {
+        stage('Install Dependencies') {
+            steps {
+                // Додаємо прапорець --break-system-packages
+                sh 'pip install -r requirements.txt --break-system-packages'
+            }
+        }
+
+        stage('Run DQ Tests') {
+            steps {
+                script {
+                    try {
+                        sh """
+                        pytest -v -m "smoke or integrity or uniqueness or unmarked" \
+                        --db_host=${DB_HOST} \
+                        --db_port=${DB_PORT} \
+                        --db_name=${DB_NAME} \
+                        --db_user=${DB_USER} \
+                        --db_password=${DB_PASSWORD} \
+                        --parquet_path=${PARQUET_PATH} \
+                        --html=report.html --self-contained-html
+                        """
+                    } catch (exc) {
+                        echo "Tests failed. Check the report in Artifacts."
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            // Залишаємо тільки архівування, воно працює без плагінів
+            archiveArtifacts artifacts: 'report.html', fingerprint: true
+        }
+    }
+}
